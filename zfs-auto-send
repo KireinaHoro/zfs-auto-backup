@@ -1,0 +1,233 @@
+#!/bin/bash
+
+DEBUG=${DEBUG:-1}
+DRY_RUN=${DRY_RUN:-1}
+
+# prefix for snapshot name (as in @znap_2018-01-01-0000_hourly)
+PREFIX="znap"
+# how should we treat "org.jsteward:auto-backup='-'"?
+UNSET_AS_TRUE=${UNSET_AS_TRUE:-0}
+# what should we do if the destination dataset needs a rollback,
+# or the destination dataset exists despite that local bookmark doesn't
+# (which indicates that the destination dataset wasn't created __by us__)?
+OVERRIDE_TARGET=${OVERRIDE_TARGET:-0}
+
+DATE="date"
+ZFS="zfs"
+
+# write the error output to stderr, then exit
+die() {
+    printf "[ERR] %s\n" "$1" >&2
+    exit 1
+}
+
+debug() {
+    if [[ $DEBUG == 1 ]]; then
+        printf "[DBG] %s\n" "$*"
+    fi
+}
+
+info() {
+    printf "[INF] %s\n" "$*"
+}
+
+if [[ $DRY_RUN == 1 ]]; then
+    info "dry run requested; commands that modify pools will be printed out instead of \
+being executed"
+fi
+
+# run given command, respecting dry run if required
+run_command() {
+    if [[ $DRY_RUN == 1 ]]; then
+        printf "[CMD] %s\n" "$*"
+    else
+        eval "$*" || die "failed to run command: $*"
+    fi
+}
+
+# print usage and exit
+usage() {
+    echo -n "
+Usage: $0 run <dataset name> : run backup on the specified dataset
+       $0 help               : display this message
+
+zfs-auto-send automatically transfers local zfs snapshots that match the given criteria
+to the configured alternative pool (via zfs send | zfs recv), set via \"org.jsteward:auto-backup*\"
+zfs property keys. The following keys are used:
+
+    # marks whether snapshots of this dataset are candidates for backup to external disk
+    org.jsteward:auto-backup = ( false | true )
+    # marks the destination to send the snapshots to
+    org.jsteward:auto-backup-dest = [ dataset path ]
+    # marks the tag of the snapshots to send
+    org.jsteward:auto-backup-tag = [ tag name ]
+
+"
+    exit 127
+}
+
+# check for required tools
+check_tools() {
+    $DATE --version >/dev/null 2>&1 || die "GNU $DATE expected"
+    command -v $ZFS >/dev/null 2>&1 || die "$ZFS command not found"
+    command -v grep >/dev/null 2>&1 || die "$ZFS command not found"
+    command -v sed >/dev/null 2>&1 || die "$ZFS command not found"
+}
+
+# get the date with timezone, used for snapshot name calculation
+get_canonical_date() {
+    printf "$($DATE +%F\ UTC%z)"
+}
+
+# format the given date accordingly
+format_date() {
+    local date_format="%F-%H%M"
+    # use $* so that caller doesn't have to quote explicitly
+    printf "$($DATE --date "$*" --utc +$date_format)"
+}
+
+# get the property named $1 (without prefix org.jsteward) from zfs object $2
+get_property() {
+    printf "%s\n" "$($ZFS get -H org.jsteward:$1 $2 | cut -f3)"
+}
+
+# check the required properties for zfs object $1, dies if found one unset
+check_properties() {
+    local flags_to_check=(
+        auto-backup 
+        auto-backup-dest
+        auto-backup-tag
+    )
+
+    local backup="$(get_property auto-backup $1)"
+    if [[ $backup == - ]]; then
+        if [[ $UNSET_AS_TRUE == 1 ]]; then
+            backup="true"
+        else
+            backup="false"
+        fi
+    fi
+    case "$backup" in
+        "true" | "on" )
+            for a in ${flags_to_check[@]}; do
+                local result="$(get_property $a $1)"
+                # default value for zfs property is "-"
+                if [[ $result == "-" ]]; then
+                    die "expected property org.jsteward:$a on zfs object $1, which is not set; \
+                        invoke $0 help to see usage"
+                fi
+            done
+            return 0 # backup enabled for $1
+            ;;
+        "false" | "off" )
+            return 1 # backup disabled for $1
+            ;;
+        * )
+            die "unrecongnized org.jsteward:auto-backup property for $1:
+expected ( ( true | on ) | ( false | off ) ), got $backup"
+            ;;
+    esac
+}
+
+# run the backup operation on zfs object $1, according to the zfs properties
+run_backup() {
+    check_properties "$1" || {
+        info "$1 not enabled for backup, skipping"
+        return
+    }
+
+    local backup_tag="$(get_property auto-backup-tag $1)"
+    local target_location="$(get_property auto-backup-dest $1)"
+    # target_snapshot example format: zroot/test@znap_2018-01-01-0000_hourly
+    local target_snapshot="$($ZFS list -H -r -t snapshot $1 \
+        | grep -E "$1@${PREFIX}_([0-9]|-){15}_$backup_tag" \
+        | tail -n1 | cut -f1)"
+    if [[ -z $target_snapshot ]]; then
+        die "target snapshot for $1 not found, aborting"
+    fi
+    local destination_dataset="${target_location%/}/$(basename $target_snapshot)"
+
+    info "backing up $target_snapshot to $destination_dataset"
+
+    debug "target snapshot for $1: ${target_snapshot:-(not found)}"
+
+    # original_bookmark example format: zroot/test#previous_znap_2018-01-01-0000_hourly
+    local original_bookmark="$($ZFS list -H -r -t bookmark $1 \
+        | grep -E "$1#previous_${PREFIX}_([0-9]|-){15}_$backup_tag" \
+        | tail -n1 | cut -f1)"
+    debug "original bookmark for $1: ${original_bookmark:-(not found)}"
+
+    if [[ $(printf "%s" "$original_bookmark" | sed -e "s|#previous_|@|") \
+        == $target_snapshot ]]; then
+        info "target snapshot $target_snapshot already backed up, skipping"
+        return 0
+    fi
+
+    # take bookmark of the target snapshot for future incremental send
+    local new_bookmark=$(printf "%s" "$target_snapshot" | sed -e 's/@/#previous_/')
+    debug "new bookmark to be set for future send: $new_bookmark"
+
+    if [[ -z $original_bookmark ]]; then
+        debug "performing full send"
+
+        debug "sending $target_snapshot to $destination_dataset"
+        if $ZFS list $destination_dataset >/dev/null 2>&1; then
+            if [[ $OVERRIDE_TARGET != 1 ]]; then
+                die "destination dataset $destination_dataset exists, yet we're not set to \
+override it; considering setting OVERRIDE_TARGET to 1 to override the target"
+            else
+                info "destroying existing $destination_dataset"
+                run_command $ZFS destroy $destination_dataset
+            fi
+        fi
+        run_command "$ZFS send $target_snapshot | $ZFS recv $destination_dataset"
+    else
+        debug "performing incremental send"
+        # get the USED size for $destination_dataset; if 0, we don't need a force recv;
+        # otherwise we'll need zfs recv -F or fail if the user didn't specify
+        local last_backup="${target_location%/}/$(printf "%s" "$(basename $original_bookmark)" \
+            | sed -e 's|#previous_|@|')"
+        local remote_snapshot_used=$($ZFS list -H -p $last_backup | cut -f2)
+        local force_recv=0
+        if [[ $remote_snapshot_used != 0 ]]; then
+            if [[ $OVERRIDE_TARGET != 1 ]]; then
+                die "destination dataset has changed since last received snapshot, yet we're not \
+set to override it; considering setting OVERRIDE_TARGET to 1 to override the target"
+            else
+                force_recv=1
+                info "a force recv will be performed"
+            fi
+        fi
+
+        debug "sending $target_snapshot incrementally (with bookmark $original_bookmark) to $destination_dataset"
+        run_command "$ZFS send -i $original_bookmark $target_snapshot | \
+$ZFS recv $([[ $force_recv == 1 ]] && printf "%s" "-F") $destination_dataset"
+    fi
+
+    # take bookmark of the target snapshot for future incremental send
+    debug "creating bookmark $new_bookmark pointing to $target_snapshot"
+    if $ZFS list -t bookmark $new_bookmark >/dev/null 2>&1; then
+        info "stale bookmark $new_bookmark found, destroying"
+        run_command $ZFS destroy $new_bookmark
+    fi
+    run_command $ZFS bookmark $target_snapshot $new_bookmark
+
+    # set "org.jsteward:auto-backup-origin" for ease of restoring the backups
+    debug "setting $target_snapshot as org.jsteward:auto-backup-origin for $destination_dataset"
+    run_command $ZFS set org.jsteward:auto-backup-origin=$target_snapshot $destination_dataset
+
+    info "backing up $target_snapshot to $destination_dataset completed"
+}
+
+run_backup_all() {
+    info "starting to backup all configured datasets"
+    for a in $($ZFS list -t filesystem -H | cut -f1); do
+        run_backup "$a"
+    done
+    info "backup of all configured datasets done"
+}
+
+# main
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    run_backup_all
+fi
