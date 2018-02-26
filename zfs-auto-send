@@ -57,8 +57,8 @@ zfs property keys. The following keys are used:
 
     # marks whether snapshots of this dataset are candidates for backup to external disk
     org.jsteward:auto-backup = ( false | true )
-    # marks the destination to send the snapshots to
-    org.jsteward:auto-backup-dest = [ dataset path ]
+    # marks the destination to send the snapshots to (parent of the backups that will be stored in)
+    org.jsteward:auto-backup-dest = [ parent path ]
     # marks the tag of the snapshots to send
     org.jsteward:auto-backup-tag = [ tag name ]
 
