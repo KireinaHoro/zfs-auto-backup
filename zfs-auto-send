@@ -174,16 +174,22 @@ run_backup() {
         debug "performing full send"
 
         debug "sending $target_snapshot to $destination_dataset"
-        if $ZFS list $destination_dataset >/dev/null 2>&1; then
+        local destination=$(printf "%s" "$destination_dataset" | sed -e 's|@.*||g')
+        local force_recv=0
+        if $ZFS list $destination >/dev/null 2>&1; then
             if [[ $OVERRIDE_TARGET != 1 ]]; then
-                die "destination dataset $destination_dataset exists, yet we're not set to \
+                die "destination $destination exists, yet we're not set to \
 override it; considering setting OVERRIDE_TARGET to 1 to override the target"
+            elif [[ $($ZFS list -t snapshot -H -r $destination | wc -l) != 0 ]]; then
+                info "destination $destination has snapshots, overriding with destroy"
+                run_command $ZFS destroy -r $destination
             else
-                info "destroying existing $destination_dataset"
-                run_command $ZFS destroy $destination_dataset
+                info "overriding destination $destination with force recv"
+                force_recv=1
             fi
         fi
-        run_command "$ZFS send $target_snapshot | $ZFS recv $destination_dataset"
+        run_command "$ZFS send $target_snapshot | \
+$ZFS recv $([[ $force_recv == 1 ]] && printf "%s" "-F") $destination_dataset"
     else
         debug "performing incremental send"
         # get the USED size for $destination_dataset; if 0, we don't need a force recv;
