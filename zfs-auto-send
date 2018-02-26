@@ -62,6 +62,9 @@ zfs property keys. The following keys are used:
     # marks the tag of the snapshots to send
     org.jsteward:auto-backup-tag = [ tag name ]
 
+Additionally, \"org.jsteward:auto-backup-origin\" will be set for the destination dataset, denoting
+the full name which the backup came from, which may help when restoring the backup.
+
 "
     exit 127
 }
