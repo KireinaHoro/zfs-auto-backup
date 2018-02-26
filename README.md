@@ -31,6 +31,8 @@ the full name which the backup came from, which may help when restoring the back
 }
 ```
 
+## Configuration
+
 `zfs-auto-backup` has some variables available for overriding upon calling:
 
  - `DEBUG` controls whether debug messages will be printed or not. (default: `1`)
@@ -44,5 +46,19 @@ They can be set in your environment, or overrided on the commandline like this:
 DRY_RUN=1 ./zfs-auto-backup
 ```
 
+## Platform compatibility
+
 This tool is a bash script tested on `GNU bash, version 4.4.19(1)-release (x86_64-unknown-linux-gnu)`.
 More tests on other shells are welcomed.
+
+## License
+
+zfs-auto-backup is licensed under GPL-3.0. The full license text is available in the repository root, named LICENSE .
+
+## Donations
+
+If you find this work helpful, consider buying me a glass of beer :) Accepted payment methods listed below:
+
+ - PayPal: i@jsteward.moe
+ - BTC: 13jTGFvjh7DAwiHZzxpaiqfehVnX2CWncC
+
