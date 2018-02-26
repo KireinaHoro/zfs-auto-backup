@@ -216,10 +216,20 @@ $ZFS recv $([[ $force_recv == 1 ]] && printf "%s" "-F") $destination_dataset"
     # take bookmark of the target snapshot for future incremental send
     debug "creating bookmark $new_bookmark pointing to $target_snapshot"
     if $ZFS list -t bookmark $new_bookmark >/dev/null 2>&1; then
-        info "stale bookmark $new_bookmark found, destroying"
+        info "destroying stale bookmark $new_bookmark"
         run_command $ZFS destroy $new_bookmark
     fi
     run_command $ZFS bookmark $target_snapshot $new_bookmark
+
+    # clean up bookmarks so that we don't have bookmarks pointing to
+    # non-existent remote snapshots
+    debug "cleaning up stale bookmarks"
+    for a in $($ZFS list -r -H -t bookmark $1 | cut -f1); do
+        if [[ $a != $new_bookmark ]]; then
+            info "destroying stale bookmark $a"
+            run_command $ZFS destroy $a
+        fi
+    done
 
     # set "org.jsteward:auto-backup-origin" for ease of restoring the backups
     debug "setting $target_snapshot as org.jsteward:auto-backup-origin for $destination_dataset"
