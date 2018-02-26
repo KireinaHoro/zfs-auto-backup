@@ -46,10 +46,10 @@ run_command() {
 # print usage and exit
 usage() {
     echo -n "
-Usage: $0 run <dataset name> : run backup on the specified dataset
-       $0 help               : display this message
+Usage: $0            : run backup on all datasets configured for zfs-auto-backup
+       $0 help       : display this message
 
-zfs-auto-send automatically transfers local zfs snapshots that match the given criteria
+zfs-auto-backup automatically transfers local zfs snapshots that match the given criteria
 to the configured alternative pool (via zfs send | zfs recv), set via \"org.jsteward:auto-backup*\"
 zfs property keys. The following keys are used:
 
