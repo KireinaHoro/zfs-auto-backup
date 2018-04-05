@@ -59,6 +59,6 @@ zfs-auto-backup is licensed under GPL-3.0. The full license text is available in
 
 If you find this work helpful, consider buying me a glass of beer :) Accepted payment methods listed below:
 
- - PayPal: i@jsteward.moe
+ - PayPal: xubin990510@gmail.com
  - BTC: 13jTGFvjh7DAwiHZzxpaiqfehVnX2CWncC
 

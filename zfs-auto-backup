@@ -31,18 +31,22 @@ ZFS="zfs"
 
 # write the error output to stderr, then exit
 die() {
-    printf "[ERR] %s\n" "$1" >&2
+    printf "[E] %s\n" "$1" >&2
     exit 1
 }
 
 debug() {
     if [[ $DEBUG == 1 ]]; then
-        printf "[DBG] %s\n" "$*"
+        printf "[D] %s\n" "$*"
     fi
 }
 
 info() {
-    printf "[INF] %s\n" "$*"
+    printf "[I] %s\n" "$*"
+}
+
+warn() {
+    printf "[W] %s\n" "$*"
 }
 
 if [[ $DRY_RUN == 1 ]]; then
@@ -53,7 +57,7 @@ fi
 # run given command, respecting dry run if required
 run_command() {
     if [[ $DRY_RUN == 1 ]]; then
-        printf "[CMD] %s\n" "$*"
+        printf "[C] %s\n" "$*"
     else
         eval "$*" || die "failed to run command: $*"
     fi
@@ -191,10 +195,10 @@ run_backup() {
                 die "destination $destination exists, yet we're not set to \
 override it; considering setting OVERRIDE_TARGET to 1 to override the target"
             elif [[ $($ZFS list -t snapshot -H -r $destination | wc -l) != 0 ]]; then
-                info "destination $destination has snapshots, overriding with destroy"
+                warn "destination $destination has snapshots, overriding with destroy"
                 run_command $ZFS destroy -r $destination
             else
-                info "overriding destination $destination with force recv"
+                warn "overriding destination $destination with force recv"
                 force_recv=1
             fi
         fi
@@ -214,7 +218,7 @@ $ZFS recv $([[ $force_recv == 1 ]] && printf "%s" "-F") $destination_dataset"
 set to override it; considering setting OVERRIDE_TARGET to 1 to override the target"
             else
                 force_recv=1
-                info "a force recv will be performed"
+                warn "a force recv will be performed"
             fi
         fi
 
@@ -257,6 +261,6 @@ run_backup_all() {
 }
 
 # main
-if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+if [[ "${warn[0]}" == "${0}" ]]; then
     run_backup_all
 fi
