@@ -1,0 +1,11 @@
+[Trigger]
+Type = File
+Operation = Install
+Operation = Upgrade
+Operation = Remove
+Target = * 
+
+[Action]
+Description = Making ZFS snapshot of zroot/ROOT/default...
+When = PreTransaction
+Exec = /bin/zfs-auto-snapshot --skip-scrub --prefix=znap --label=pacman-auto --keep 10 zroot/ROOT/default
